@@ -1,5 +1,6 @@
 ﻿//Copyright © 2014 Sony Computer Entertainment America LLC. See License.txt.
 
+using System;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Threading;
@@ -25,11 +26,10 @@ namespace Sce.Atf
             string language = Thread.CurrentThread.CurrentUICulture.TwoLetterISOLanguageName; //"en" or "ja"
             string culture = Thread.CurrentThread.CurrentUICulture.Name; //"en-US" or "ja-JP"
 
-            // In the satellite assembly model, the English version is in the root directory plus our
-            //  source code is written in English. No use doing a lot of searching for English translations.
-            // Yes, this doesn't work if we port ATF to English-Australia. Unlikely!
-            if (language == "en")
-                return;
+            // Embedded resource namespaces can't contain certain characters and get renamed
+            //  automatically by the compiler. So, '-' got replaced by '_' while compiling.
+            // https://msdn.microsoft.com/en-us/library/ms145952.aspx
+            culture = culture.Replace('-', '_');
 
             // To speed things up, only check the GAC if this assembly has been installed in the GAC.
             // This allows us to skip mscorlib, etc.
@@ -37,33 +37,46 @@ namespace Sce.Atf
 
             // Resources are named like "Some.Random.Namespace.Resources.ja.Another.Random.Name.Localization.xml".
             // Let's search for ".Resources.ja" to make sure we're locating the correct file.
-            string resourceDirectory1 = ".Resources." + language + ".";
-            string resourceDirectory2 = ".Resources." + culture + ".";
+            m_resourceDirectory1 = ".Resources." + language + ".";
+            m_resourceDirectory2 = ".Resources." + culture + ".";
 
             foreach (Assembly assembly in AssemblyUtil.GetLoadedAssemblies())
             {
-                //dynamically generated assemblies don't implement GetManifestResourceXxx()
-                if (assembly is AssemblyBuilder)
-                    continue;
-
                 if (searchGAC ||
                     !assembly.GlobalAssemblyCache)
                 {
-                    foreach (string resourceName in assembly.GetManifestResourceNames())
-                    {
-                        if (IsEmbeddedResource(resourceName, resourceDirectory1, resourceDirectory2))
-                        {
-                            XmlDocument xmlDoc = new XmlDocument();
-                            xmlDoc.Load(assembly.GetManifestResourceStream(resourceName));
-                            AddLocalizedStrings(xmlDoc);
-                        }
-                    }
+                    LoadEmeddedResources(assembly);
+                }
+            }
+
+            // Subscribe to new assemblies
+            AppDomain.CurrentDomain.AssemblyLoad += CurrentDomainOnAssemblyLoad;
+        }
+
+        private void CurrentDomainOnAssemblyLoad(object sender, AssemblyLoadEventArgs args)
+        {
+            LoadEmeddedResources(args.LoadedAssembly);
+        }
+
+        private void LoadEmeddedResources(Assembly assembly)
+        {
+            // dynamically generated assemblies don't implement GetManifestResourceXxx()
+            if (assembly is AssemblyBuilder || assembly.IsDynamic)
+                return;
+
+            foreach (string resourceName in assembly.GetManifestResourceNames())
+            {
+                if (IsEmbeddedResource(resourceName, m_resourceDirectory1, m_resourceDirectory2))
+                {
+                    XmlDocument xmlDoc = new XmlDocument();
+                    xmlDoc.Load(assembly.GetManifestResourceStream(resourceName));
+                    AddLocalizedStrings(xmlDoc);
                 }
             }
         }
 
         // Searches a resource name that came from an assembly's manifest to see if it represents an
-        //  embedded localization file and that it is in within one of the namespaces.
+        // embedded localization file and that it is in within one of the namespaces.
         private bool IsEmbeddedResource(string resourceName, string namespace1, string namespace2)
         {
             return
@@ -73,5 +86,8 @@ namespace Sce.Atf
                     resourceName.Contains(namespace2)
                 );
         }
+
+        private readonly string m_resourceDirectory1;
+        private readonly string m_resourceDirectory2;
     }
 }

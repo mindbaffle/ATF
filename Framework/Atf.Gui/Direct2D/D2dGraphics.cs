@@ -152,8 +152,8 @@ namespace Sce.Atf.Direct2D
         /// Initiates drawing on this D2dGraphics</summary>
         public void BeginDraw()
         {
-            D2dFactory.CheckForRecreateTarget();
-            m_renderTarget.BeginDraw();
+            D2dFactory.CheckForRecreateTarget();            
+            m_renderTarget.BeginDraw();            
         }
 
         /// <summary>
@@ -164,8 +164,8 @@ namespace Sce.Atf.Direct2D
         public D2dResult EndDraw()
         {
             try
-            {
-                m_renderTarget.EndDraw();
+            {                
+                m_renderTarget.EndDraw();             
             }
             catch (SharpDXException ex)
             {
@@ -174,10 +174,13 @@ namespace Sce.Atf.Direct2D
                 {
                     D2dFactory.CheckForRecreateTarget();
                     RecreateTargetAndResources();
-
                 }
-                else
-                    throw;
+                else 
+                {
+                    while (m_clipStack.Count > 0) PopAxisAlignedClip();
+                    try { m_renderTarget.Flush(); } catch { }
+                    throw;                    
+                }                
             }
             return D2dResult.Ok;
         }
@@ -633,12 +636,12 @@ namespace Sce.Atf.Direct2D
                 = new SharpDX.DirectWrite.TextLayout(D2dFactory.NativeDwFactory,
                     text, textFormat.NativeTextFormat, rtsize.Width, rtsize.Height))
             {
+                layout.TextAlignment = SharpDX.DirectWrite.TextAlignment.Leading;
+                layout.ParagraphAlignment = SharpDX.DirectWrite.ParagraphAlignment.Near;
                 if (textFormat.Underlined)
-                    layout.SetUnderline(true,
-                                        new SharpDX.DirectWrite.TextRange(0, text.Length));
+                    layout.SetUnderline(true,new SharpDX.DirectWrite.TextRange(0, text.Length));
                 if (textFormat.Strikeout)
-                    layout.SetStrikethrough(true,
-                                            new SharpDX.DirectWrite.TextRange(0, text.Length));
+                    layout.SetStrikethrough(true,new SharpDX.DirectWrite.TextRange(0, text.Length));
                 m_renderTarget.DrawTextLayout(upperLeft.ToSharpDX(),
                     layout,
                     brush.NativeBrush,
@@ -667,9 +670,7 @@ namespace Sce.Atf.Direct2D
         /// <param name="brush">The brush used to paint the text</param>
         public void DrawText(string text, D2dTextFormat textFormat, RectangleF layoutRect, D2dBrush brush)
         {
-            using (var layout
-                = new SharpDX.DirectWrite.TextLayout(D2dFactory.NativeDwFactory
-                    , text, textFormat.NativeTextFormat, layoutRect.Width, layoutRect.Height))
+            using (var layout = new SharpDX.DirectWrite.TextLayout(D2dFactory.NativeDwFactory, text, textFormat.NativeTextFormat, layoutRect.Width, layoutRect.Height))
             {
                 if (textFormat.Underlined)
                     layout.SetUnderline(true, new SharpDX.DirectWrite.TextRange(0, text.Length));
@@ -1329,14 +1330,24 @@ namespace Sce.Atf.Direct2D
         /// Pixel format is set to 32 bit ARGB with premultiplied alpha</summary>      
         /// <param name="width">Width of the bitmap in pixels</param>
         /// <param name="height">Height of the bitmap in pixels</param>
+        /// <param name="createBackupBitmap">If true a GDI bitmap is created and used
+        /// to recreate this D2dBitmap when needed</param>
         /// <returns>A new D2dBitmap</returns>
-        public D2dBitmap CreateBitmap(int width, int height)
+        public D2dBitmap CreateBitmap(int width, int height, bool createBackupBitmap = true)
         {
             if (width < 1 || height < 1)
                 throw new ArgumentOutOfRangeException("Width and height must be greater than zero");
-
-            var bmp = new System.Drawing.Bitmap(width, height, GdiPixelFormat.Format32bppPArgb);
-            return new D2dBitmap(this, bmp);
+            D2dBitmap  d2dBmp = null;
+            if(createBackupBitmap)
+            {
+                System.Drawing.Bitmap gdiBmp = new System.Drawing.Bitmap(width, height, GdiPixelFormat.Format32bppPArgb);
+                d2dBmp = new D2dBitmap(this, gdiBmp);
+            }
+            else
+            {
+                d2dBmp = new D2dBitmap(this,width,height);
+            }
+            return d2dBmp;
         }
 
         /// <summary>
@@ -1347,7 +1358,7 @@ namespace Sce.Atf.Direct2D
         public D2dBitmapGraphics CreateCompatibleGraphics()
         {
             var rt = new BitmapRenderTarget(m_renderTarget, CompatibleRenderTargetOptions.None);
-            return new D2dBitmapGraphics(rt);
+            return new D2dBitmapGraphics(this, rt);
         }
 
         /// <summary>
@@ -1359,7 +1370,7 @@ namespace Sce.Atf.Direct2D
         public D2dBitmapGraphics CreateCompatibleGraphics(D2dCompatibleGraphicsOptions options)
         {
             var rt = new BitmapRenderTarget(m_renderTarget, (CompatibleRenderTargetOptions)options);
-            return new D2dBitmapGraphics(rt);
+            return new D2dBitmapGraphics(this, rt);
 
         }
 
@@ -1374,7 +1385,7 @@ namespace Sce.Atf.Direct2D
         {
             var dsize = new Size2(pixelSize.Width, pixelSize.Height);
             var rt = new BitmapRenderTarget(m_renderTarget, (CompatibleRenderTargetOptions)options, null, dsize, null);
-            return new D2dBitmapGraphics(rt);
+            return new D2dBitmapGraphics(this, rt);
         }
 
         /// <summary>
@@ -1387,7 +1398,7 @@ namespace Sce.Atf.Direct2D
         public D2dBitmapGraphics CreateCompatibleGraphics(SizeF size, D2dCompatibleGraphicsOptions options)
         {
             var rt = new BitmapRenderTarget(m_renderTarget, (CompatibleRenderTargetOptions)options, size.ToSharpDX(), null, null);
-            return new D2dBitmapGraphics(rt);
+            return new D2dBitmapGraphics(this, rt);
         }
 
         /// <summary>
@@ -1486,6 +1497,7 @@ namespace Sce.Atf.Direct2D
             if (renderTarget == null)
                 throw new ArgumentNullException("renderTarget");
 
+            m_clipStack.Clear();
             ReleaseResources(true);
             m_renderTargetNumber++;
             m_renderTarget = renderTarget;
@@ -1599,6 +1611,7 @@ namespace Sce.Atf.Direct2D
         private uint m_renderTargetNumber;
         private static readonly Result D2DERR_WRONG_RESOURCE_DOMAIN = new Result(0x88990015);
         private static readonly Result D2DERR_RECREATE_TARGET = new Result(0x8899000C);
+        //private static readonly Result D2DERR_PUSH_POP_UNBALANCED = new Result(0x88990016);
         private const double DPI = 3.1415926535897931;
         private const float ToRadian = (float)(DPI / 180.0);
         // temp list of points used by DrawArc.

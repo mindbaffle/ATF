@@ -24,10 +24,9 @@ namespace UnitTests
         }
 
         /// <summary>
-        /// Runs all tests.
-        /// </summary>
-        /// <param name="testAssemblyName">Name of the test assembly.</param>
-        /// <returns>0 if tests ran successfully, -1 otherwise</returns>
+        /// Runs all tests</summary>
+        /// <param name="testAssemblyName">Name of the test assembly</param>
+        /// <returns>0 if tests ran successfully, a negative number otherwise</returns>
         public static int RunAllTests(string testAssemblyName)
         {
             TestRunner runner;

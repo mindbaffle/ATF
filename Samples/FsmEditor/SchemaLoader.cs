@@ -1,11 +1,15 @@
 ﻿//Copyright © 2014 Sony Computer Entertainment America LLC. See License.txt.
 
+using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.Composition;
 using System.Reflection;
 using System.Xml.Schema;
 
 using Sce.Atf;
+using Sce.Atf.Adaptation;
+using Sce.Atf.Applications;
 using Sce.Atf.Controls.PropertyEditing;
 using Sce.Atf.Dom;
 
@@ -17,17 +21,36 @@ namespace FsmEditorSample
     /// Loads the FSM schema, registers data extensions on the DOM types, annotates
     /// the types with display information and PropertyDescriptors</summary>
     [Export(typeof(SchemaLoader))]
+    [Export(typeof(IInitializable))]
     [PartCreationPolicy(CreationPolicy.Shared)]
-    public class SchemaLoader : XmlSchemaTypeLoader
+    public class SchemaLoader : XmlSchemaTypeLoader, IInitializable
     {
         /// <summary>
         /// Constructor</summary>
-        public SchemaLoader()
+        [ImportingConstructor]
+        public SchemaLoader(PropertyEditor propertyEditor)
         {
+            m_propertyEditor = propertyEditor;
             // set resolver to locate embedded .xsd file
             SchemaResolver = new ResourceStreamResolver(Assembly.GetExecutingAssembly(), "FsmEditorSample/schemas");
             Load("FSM_customized.xsd");
         }
+
+        #region IInitializable Members
+
+        void IInitializable.Initialize()
+        {
+            // Set custom display options for the 2-column PropertyEditor
+            PropertyGridView propertyGridView = m_propertyEditor.PropertyGrid.PropertyGridView;
+            if (propertyGridView.CustomizeAttributes != null)
+                throw new InvalidOperationException("Someone else set PropertyGridView's CustomizeAttributes already");
+            propertyGridView.CustomizeAttributes = new[]
+                {
+                    new PropertyView.CustomizeAttribute("Triggers".Localize(), horizontalEditorOffset:0, nameHasWholeRow:true),                    
+                };
+        }
+
+        #endregion
 
         /// <summary>
         /// Gets the schema namespace</summary>
@@ -86,102 +109,195 @@ namespace FsmEditorSample
 
                 // annotate state and annotation types with display information for palette
 
+                Schema.stateType.labelAttribute.DefaultValue = "State".Localize();
+
                 Schema.stateType.Type.SetTag(
                     new NodeTypePaletteItem(
                         Schema.stateType.Type,
-                        Localizer.Localize("State"),
-                        Localizer.Localize("State in a finite state machine"),
+                        (string)Schema.stateType.labelAttribute.DefaultValue,
+                        "State in a finite state machine".Localize(),
                         Resources.StateImage));
 
                 Schema.annotationType.Type.SetTag(
                     new NodeTypePaletteItem(
                         Schema.annotationType.Type,
-                        Localizer.Localize("Comment"),
-                        Localizer.Localize("Comment on state machine"),
+                        "Comment".Localize(),
+                        "Comment on state machine".Localize(),
                         Resources.AnnotationImage));
 
                 // register property descriptors on state, transition, folder types
+
+                // TransitionType have a collection of child triggers.
+                // use EmbeddedCollectionEditor to edit children (edit, add, remove, move).
+                // Note: EmbeddedCollectionEditor needs some work (efficiency and implementation issues).                
+                var collectionEditor = new EmbeddedCollectionEditor();
+
+                // the following  lambda's handles (add, remove, move ) items.
+                collectionEditor.GetItemInsertersFunc = (context) =>
+                {
+                    var insertors
+                        = new EmbeddedCollectionEditor.ItemInserter[1];
+
+                    var list = context.GetValue() as IList<DomNode>;
+                    if (list != null)
+                    {
+                        var childDescriptor
+                            = context.Descriptor as ChildPropertyDescriptor;
+                        if (childDescriptor != null)
+                        {
+                            insertors[0] = new EmbeddedCollectionEditor.ItemInserter(childDescriptor.ChildInfo.Type.Name,
+                        delegate
+                        {
+                            DomNode node = new DomNode(childDescriptor.ChildInfo.Type);
+                            if (node.Type.IdAttribute != null)
+                            {
+                                node.SetAttribute(node.Type.IdAttribute, node.Type.Name);
+                            }
+                            list.Add(node);
+                            return node;
+                        });
+                            return insertors;
+                        }
+                    }
+                    return EmptyArray<EmbeddedCollectionEditor.ItemInserter>.Instance;
+                };
+
+
+                collectionEditor.RemoveItemFunc = (context, item) =>
+                {
+                    var list = context.GetValue() as IList<DomNode>;
+                    if (list != null)
+                        list.Remove(item.Cast<DomNode>());
+                };
+
+
+                collectionEditor.MoveItemFunc = (context, item, delta) =>
+                {
+                    var list = context.GetValue() as IList<DomNode>;
+                    if (list != null)
+                    {
+                        DomNode node = item.Cast<DomNode>();
+                        int index = list.IndexOf(node);
+                        int insertIndex = index + delta;
+                        if (insertIndex < 0 || insertIndex >= list.Count)
+                            return;
+                        list.RemoveAt(index);
+                        list.Insert(insertIndex, node);
+                    }
+
+                };
 
                 Schema.stateType.Type.SetTag(
                     new PropertyDescriptorCollection(
                         new PropertyDescriptor[] {
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Name"),
+                                "Name".Localize(),
                                 Schema.stateType.labelAttribute, // 'nameAttribute' is unique id, label is user visible name
                                 null,
-                                Localizer.Localize("State name"),
+                                "State name".Localize(),
                                 false),
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Size"),
+                                "Size".Localize(),
                                 Schema.stateType.sizeAttribute,
                                 null,
-                                Localizer.Localize("State size"),
+                                "State size".Localize(),
                                 false),
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Hidden"),
+                                "Hidden".Localize(),
                                 Schema.stateType.hiddenAttribute,
                                 null,
-                                Localizer.Localize("Whether or not state is hidden"),
+                                "Whether or not state is hidden".Localize(),
                                 false,
                                 new BoolEditor()),
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Start"),
+                                "Start".Localize(),
                                 Schema.stateType.startAttribute,
                                 null,
-                                Localizer.Localize("Whether or not state is the start state"),
+                                "Whether or not state is the start state".Localize(),
                                 false,
                                 new BoolEditor()),
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Entry Action"),
+                                "Entry Action".Localize(),
                                 Schema.stateType.entryActionAttribute,
                                 null,
-                                Localizer.Localize("Action performed when entering state"),
+                                "Action performed when entering state".Localize(),
                                 false),
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Action"),
+                                "Action".Localize(),
                                 Schema.stateType.actionAttribute,
                                 null,
-                                Localizer.Localize("Action performed while in state"),
+                                "Action performed while in state".Localize(),
                                 false),
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Exit Action"),
+                                "Exit Action".Localize(),
                                 Schema.stateType.exitActionAttribute,
                                 null,
-                                Localizer.Localize("Action performed when exiting state"),
+                                "Action performed when exiting state".Localize(),
                                 false),
                     }));
+
+               
+                Schema.triggerType.Type.SetTag(
+                    new PropertyDescriptorCollection(
+                        new PropertyDescriptor[] {
+                            new AttributePropertyDescriptor(
+                                "Label".Localize(),
+                                Schema.triggerType.labelAttribute,
+                                null,
+                                "Label displayed on trigger".Localize(),
+                                false),                            
+                            new AttributePropertyDescriptor(
+                                "Id".Localize(),
+                                Schema.triggerType.idAttribute,
+                                null,
+                                "Trigger id".Localize(),
+                                false),
+                            new AttributePropertyDescriptor(
+                                "Action".Localize(),
+                                Schema.triggerType.actionAttribute,
+                                null,
+                                "Action on trigger".Localize(),
+                                false)
+
+                }));
+
+
+
+               
+
 
                 Schema.transitionType.Type.SetTag(
                     new PropertyDescriptorCollection(
                         new PropertyDescriptor[] {
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Label"),
+                                "Label".Localize(),
                                 Schema.transitionType.labelAttribute,
                                 null,
-                                Localizer.Localize("Label displayed on transition"),
-                                false),
+                                "Label displayed on transition".Localize(),
+                                false),                            
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Trigger"),
-                                Schema.transitionType.triggerAttribute,
-                                null,
-                                Localizer.Localize("Event which triggers transition"),
-                                false),
-                            new AttributePropertyDescriptor(
-                                Localizer.Localize("Action"),
+                                "Action".Localize(),
                                 Schema.transitionType.actionAttribute,
                                 null,
-                                Localizer.Localize("Action performed when making transition"),
+                                "Action performed when making transition".Localize(),
                                 false),
+                           new ChildPropertyDescriptor(
+                               "Triggers".Localize(),
+                               Schema.transitionType.triggerChild,
+                               null,
+                               "List of triggers".Localize(),
+                               false,
+                               collectionEditor)
                         }));
 
                 Schema.prototypeFolderType.Type.SetTag(
                     new PropertyDescriptorCollection(
                         new PropertyDescriptor[] {
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Name"),
+                                "Name".Localize(),
                                 Schema.prototypeFolderType.nameAttribute,
                                 null,
-                                Localizer.Localize("Prototype folder name"),
+                                "Prototype folder name".Localize(),
                                 false)
                     }));
 
@@ -189,10 +305,10 @@ namespace FsmEditorSample
                     new PropertyDescriptorCollection(
                         new PropertyDescriptor[] {
                             new AttributePropertyDescriptor(
-                                Localizer.Localize("Text"),
+                                "Text".Localize(),
                                 Schema.annotationType.textAttribute,
                                 null,
-                                Localizer.Localize("Comment text"),
+                                "Comment text".Localize(),
                                 false)
                     }));
 
@@ -200,5 +316,7 @@ namespace FsmEditorSample
                 break;
             }
         }
+
+        private readonly PropertyEditor m_propertyEditor;
     }
 }

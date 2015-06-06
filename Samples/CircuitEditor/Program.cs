@@ -1,6 +1,8 @@
 ﻿//Copyright © 2014 Sony Computer Entertainment America LLC. See License.txt.
 
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.ComponentModel.Composition.Hosting;
 using System.Drawing;
@@ -13,9 +15,11 @@ using Sce.Atf.Adaptation;
 using Sce.Atf.Applications;
 using Sce.Atf.Controls.Adaptable;
 using Sce.Atf.Controls.Adaptable.Graphs;
+using Sce.Atf.Controls.PropertyEditing;
 using Sce.Atf.Dom;
 
 using CircuitEditorSample.Tests;
+using PropertyGrid = Sce.Atf.Controls.PropertyEditing.PropertyGrid;
 
 namespace CircuitEditorSample
 {
@@ -84,12 +88,12 @@ namespace CircuitEditorSample
 
                 typeof(PaletteService),                 // global palette, for drag/drop instancing
 
-                typeof(PropertyEditor),                 // property grid for editing selected objects
+                typeof(MyPropertyEditor),               // property grid for editing selected objects; uses tooltips to show property descriptions
                 typeof(GridPropertyEditor),             // grid control for editing selected objects
                 typeof(PropertyEditingCommands),        // commands for PropertyEditor and GridPropertyEditor, like Reset,
                                                         //  Reset All, Copy Value, Paste Value, Copy All, Paste All
 
-                typeof(HistoryLister),                  // vistual list of undo/redo stack
+                typeof(HistoryLister),                  // visual list of undo/redo stack
                 typeof(PrototypeLister),                // editable palette of instantiable item groups
                 typeof(LayerLister),                    // editable tree view of layers
 
@@ -98,20 +102,17 @@ namespace CircuitEditorSample
                 typeof(OutputService),                  // rich text box for displaying error and warning messages. Implements IOutputWriter.
                 typeof(DomRecorder),                    // records and displays changes to the DOM for diagnostic purposes
 
-                typeof(DiagramTheme),                   // rendering theme for diagrams
-
                 typeof(Editor),                         // editor which manages circuit documents and controls
                 typeof(SchemaLoader),                   // loads circuit schema and extends types
                 typeof(GroupingCommands),               // circuit group/ungroup commands
                 typeof(CircuitControlRegistry),         // circuit controls management
-                typeof(MasteringCommands),              // circuit master/unmaster commands
                 typeof(LayeringCommands),               // "Add Layer" command
                 typeof(GraphViewCommands),              // zooming with presets
                 typeof(PerformanceMonitor),             // displays the frame rate and memory usage
                 typeof(DefaultTabCommands),             // provides the default commands related to document tab Controls
                 typeof(ModulePlugin),                   // component that defines circuit module types
                 typeof(TemplateLister),                 // template library for subgraph referencing or instancing 
-                typeof(TemplatingCommands),             // commands for promoting/depromoting graph elements to/from template library 
+                typeof(TemplatingCommands),             // commands for promoting/demoting graph elements to/from template library 
                 //typeof(TemplatingSupervisor),         // templated instances copy-on-edit support(optionally)
 
                 typeof(AnnotatingCommands),             // annotating commands
@@ -143,6 +144,10 @@ namespace CircuitEditorSample
             batch.AddPart(new WebHelpCommands("https://github.com/SonyWWS/ATF/wiki/ATF-Circuit-Editor-Sample".Localize()));
             container.Compose(batch);
 
+            // Add a customized category comparer to the object palette.
+            var paletteService = container.GetExportedValue<PaletteService>();
+            paletteService.CategoryComparer = new CategoryComparer();
+
             // Initialize components that require it. Initialization often can't be done in the constructor,
             //  or even after imports have been satisfied by MEF, since we allow circular dependencies between
             //  components, via the System.Lazy class. IInitializable allows components to defer some operations
@@ -156,6 +161,62 @@ namespace CircuitEditorSample
 
             // Give components a chance to clean up.
             container.Dispose();
+        }
+
+        // Demonstrates the PaletteService.CategoryComparer feature.
+        private class CategoryComparer : IComparer<string>
+        {
+            // returns -1, 0, or 1, if x is before, the same as, or after y.
+            public int Compare(string x, string y)
+            {
+                // If both categories are the same (including if they are both s_lastCategory), return 0.
+                if (x == y)
+                    return 0;
+
+                // Place this category last.
+                if (x == s_lastCategory)
+                    return 1;
+                if (y == s_lastCategory)
+                    return -1;
+
+                // Otherwise, sort in alphabetical order.
+                return string.Compare(x, y, StringComparison.CurrentCultureIgnoreCase);
+            }
+
+            private static readonly string s_lastCategory = "Misc".Localize("abbreviation for miscellaneous");
+        }
+
+        [Export(typeof(IInitializable))]
+        [Export(typeof(IControlHostClient))]
+        [Export(typeof(PropertyEditor))]
+        [PartCreationPolicy(CreationPolicy.Any)]
+        // Demonstrates using tooltips instead of an embedded Control to display property descriptions.
+        private class MyPropertyEditor : PropertyEditor
+        {
+            /// <summary>
+            /// Constructor with parameters</summary>
+            /// <param name="commandService">ICommandService</param>
+            /// <param name="controlHostService">IControlHostService</param>
+            /// <param name="contextRegistry">IContextRegistry</param>
+            [ImportingConstructor]
+            public MyPropertyEditor(
+                ICommandService commandService,
+                IControlHostService controlHostService,
+                IContextRegistry contextRegistry)
+                : base(commandService, controlHostService, contextRegistry)
+            {
+            }
+
+            protected override void Configure(out PropertyGrid propertyGrid, out ControlInfo controlInfo)
+            {
+                // Test that DisplayTooltips works instead of the usual DisplayDescriptions.
+                propertyGrid = new PropertyGrid(PropertyGridMode.DisplayTooltips, new PropertyGridView());
+                controlInfo = new ControlInfo(
+                    "Property Editor".Localize(),
+                    "Edits selected object properties".Localize(),
+                    StandardControlGroup.Right, null,
+                    "https://github.com/SonyWWS/ATF/wiki/Property-Editing-in-ATF".Localize());
+            }
         }
     }
 }

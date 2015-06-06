@@ -113,9 +113,11 @@
     <Compile Include="Sce.Atf\Controls\PropertyEditing\TestPropertyUtils.cs" />
     <Compile Include="Sce.Atf\Dom\TestChildAttributePropertyDescriptor.cs" />
     <Compile Include="Sce.Atf\Dom\TestDataValidator.cs" />
+    <Compile Include="Sce.Atf\Dom\TestUniquePathIdValidator.cs" />
     <Compile Include="Sce.Atf\Dom\TestSchemas.cs" />
     <Compile Include="Sce.Atf\Dom\TestTransactionReporter.cs" />
     <Compile Include="Sce.Atf\TestEnumUtil.cs" />
+    <Compile Include="Sce.Atf\TestMultimap.cs" />
     <Compile Include="Sce.Atf\TestPath.cs" />
     <Compile Include="Sce.Atf\Dom\TestAttributePropertyDescriptor.cs" />
     <Compile Include="Sce.Atf\Dom\ValidationContext.cs" />

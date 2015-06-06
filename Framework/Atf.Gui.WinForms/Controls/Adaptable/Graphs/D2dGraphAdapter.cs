@@ -34,8 +34,7 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
             ITransformAdapter transformAdapter)
         {            
             m_renderer = renderer;
-            m_renderer.Redraw += new EventHandler(renderer_Redraw);
-            m_transformAdapter = transformAdapter;
+            m_renderer.Redraw += renderer_Redraw;
             m_renderer.GetStyle = GetStyle;
         }
 
@@ -61,7 +60,7 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
         /// Releases non-memory resources</summary>
         public void Dispose()
         {
-             m_renderer.Redraw -= new EventHandler(renderer_Redraw);
+             m_renderer.Redraw -= renderer_Redraw;
              Dispose(true);
         }
 
@@ -84,9 +83,14 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
         /// Gets the current rendering style for an item</summary>
         /// <param name="item">Rendered item</param>
         /// <returns>Rendering style set by SetStyle, Normal if no override is set</returns>
-        public DiagramDrawingStyle GetStyle(object item)
+        public virtual DiagramDrawingStyle GetStyle(object item)
         {
-            DiagramDrawingStyle result = DiagramDrawingStyle.Normal;
+            // Give the renderer an opportunity to override our style selection.
+            DiagramDrawingStyle result = m_renderer.GetCustomStyle(item);
+            if (result != DiagramDrawingStyle.None)
+                return result;
+
+            result = DiagramDrawingStyle.Normal;
             // no override
             if (m_visibilityContext != null && !m_visibilityContext.IsVisible(item))
             {
@@ -115,7 +119,7 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
                 else if (item.Is<Group>())
                     result = DiagramDrawingStyle.CopyInstance;
                 else
-                result = DiagramDrawingStyle.Hot;
+                    result = DiagramDrawingStyle.Hot;
             }
             else if (m_renderer.RouteConnecting != null)
             {
@@ -133,7 +137,7 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
 
         /// <summary>
         /// Hides the given edge.
-        /// This method is used for hidding an edge while dragging its replacement.</summary>
+        /// This method is used for hiding an edge while dragging its replacement.</summary>
         /// <param name="edge">Edge to be hidden or null</param>
         public void HideEdge(TEdge edge)
         {
@@ -360,39 +364,58 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
 
 
             // Draw normal nodes first
-            TNode selectedGroup = null;
+            TNode containerOfSelectedNode = null;
             var draggingNodes = new List<TNode>();
-            var expandedGroupNodes = new List<TNode>();
+            var selectedNodes = new List<TNode>();
+            var expandedGroups = new List<TNode>();
             foreach (var node in m_graph.Nodes)
             {
                 RectangleF nodeBounds = m_renderer.GetBounds(node, m_d2dGraphics);
                 if (boundsGr.IntersectsWith(nodeBounds))
                 {
-                    bool expandedGroup = false;
-                    if (node.Is<ICircuitGroupType<TNode, TEdge, TEdgeRoute>>())
+                    DiagramDrawingStyle drawStyle = GetStyle(node);
+                    
+                    // Draw all dragged nodes (even expanded groups) last.
+                    if (drawStyle == DiagramDrawingStyle.DragSource)
                     {
-                        var group = node.Cast<ICircuitGroupType<TNode, TEdge, TEdgeRoute>>();
-                        group.Info.PickingPriority = 0;
-                        if (group.Expanded)
-                        {
-
-                            if (node == ActicveContainer())
-                                selectedGroup = node;
-                            else
-                                expandedGroupNodes.Add(node);
-                            expandedGroup = true;
-                        }
+                        draggingNodes.Add(node);
                     }
-
-                    if (!expandedGroup)
+                    else
                     {
-                        if (m_renderer.GetCustomStyle(node) == DiagramDrawingStyle.DragSource)
-                            draggingNodes.Add(node);
+                        // Draw selected nodes nodes after normal nodes. If the node
+                        //  is hot, check if it's selected.
+                        if (drawStyle == DiagramDrawingStyle.Selected ||
+                            drawStyle == DiagramDrawingStyle.LastSelected ||
+                            (drawStyle == DiagramDrawingStyle.Hot && m_selectionContext != null &&
+                                m_selectionContext.SelectionContains(node)))
+                        {
+                            selectedNodes.Add(node);
+                        }
                         else
                         {
-                            m_renderer.Draw(node, GetStyle(node), m_d2dGraphics);
-                            if (EdgeRenderPolicy == DrawEdgePolicy.Associated)
-                                TryDrawAssociatedEdges(node, boundsGr);
+                            // Expanded groups are drawn after normal nodes.
+                            bool expandedGroup = false;
+                            var group = node.As<ICircuitGroupType<TNode, TEdge, TEdgeRoute>>();
+                            if (group != null)
+                            {
+                                group.Info.PickingPriority = 0;
+                                if (group.Expanded)
+                                {
+                                    if (node == ActiveContainer())
+                                        containerOfSelectedNode = node;
+                                    else
+                                        expandedGroups.Add(node);
+                                    expandedGroup = true;
+                                }
+                            }
+
+                            // Draw normal nodes and collapsed groups.
+                            if (!expandedGroup)
+                            {
+                                m_renderer.Draw(node, drawStyle, m_d2dGraphics);
+                                if (EdgeRenderPolicy == DrawEdgePolicy.Associated)
+                                    TryDrawAssociatedEdges(node, boundsGr);
+                            }
                         }
                     }
                 }
@@ -400,8 +423,10 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
                     TryDrawAssociatedEdges(node, boundsGr);
             }
 
+            // Draw expanded groups on top of normal sibling nodes, so that normal nodes that overlap
+            //  these groups don't appear as if they are in the groups.
             int pickPriority = 0;
-            foreach (var node in expandedGroupNodes)
+            foreach (var node in expandedGroups)
             {
                 var group = node.Cast<ICircuitGroupType<TNode, TEdge, TEdgeRoute>>();
                 group.Info.PickingPriority = pickPriority++;
@@ -410,13 +435,26 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
                     TryDrawAssociatedEdges(node, boundsGr);
             }
 
-            if (selectedGroup != null)
+            // Draw the expanded group that contains a selected or dragged child node, so that
+            //  if multiple expanded groups overlap, that the user can see the owning group.
+            if (containerOfSelectedNode != null)
             {
-                var group = selectedGroup.Cast<ICircuitGroupType<TNode, TEdge, TEdgeRoute>>();
+                var group = containerOfSelectedNode.Cast<ICircuitGroupType<TNode, TEdge, TEdgeRoute>>();
                 group.Info.PickingPriority = pickPriority++;
-                m_renderer.Draw(selectedGroup, GetStyle(selectedGroup), m_d2dGraphics);
+                m_renderer.Draw(containerOfSelectedNode, GetStyle(containerOfSelectedNode), m_d2dGraphics);
                 if (EdgeRenderPolicy == DrawEdgePolicy.Associated)
-                    TryDrawAssociatedEdges(selectedGroup, boundsGr);
+                    TryDrawAssociatedEdges(containerOfSelectedNode, boundsGr);
+            }
+
+            // Draw selected nodes.
+            foreach (var node in selectedNodes)
+            {
+                var group = node.As<ICircuitGroupType<TNode, TEdge, TEdgeRoute>>();
+                if (group != null)
+                    group.Info.PickingPriority = pickPriority++;
+                m_renderer.Draw(node, GetStyle(node), m_d2dGraphics);
+                if (EdgeRenderPolicy == DrawEdgePolicy.Associated)
+                    TryDrawAssociatedEdges(node, boundsGr);
             }
 
             // Draw dragging nodes last to ensure they are visible (necessary for container-crossing move operation)
@@ -428,8 +466,7 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
             }
         }
 
-
-        private object ActicveContainer()
+        private object ActiveContainer()
         {
             if (m_selectionContext != null )
             {
@@ -437,7 +474,6 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
             }
             return null;
         }
-
 
         // draw an edge as soon as both of its start and end nodes are drawn
         private void TryDrawAssociatedEdges(TNode nodeDrawn, RectangleF clipBounds)
@@ -542,15 +578,15 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
                 {
                     if (m_observableContext != null)
                     {
-                        m_observableContext.ItemInserted -= new EventHandler<ItemInsertedEventArgs<object>>(graph_ObjectInserted);
-                        m_observableContext.ItemRemoved -= new EventHandler<ItemRemovedEventArgs<object>>(graph_ObjectRemoved);
-                        m_observableContext.ItemChanged -= new EventHandler<ItemChangedEventArgs<object>>(graph_ObjectChanged);
-                        m_observableContext.Reloaded -= new EventHandler(graph_Reloaded);
+                        m_observableContext.ItemInserted -= graph_ObjectInserted;
+                        m_observableContext.ItemRemoved -= graph_ObjectRemoved;
+                        m_observableContext.ItemChanged -= graph_ObjectChanged;
+                        m_observableContext.Reloaded -= graph_Reloaded;
                         m_observableContext = null;
                     }
                     if (m_selectionContext != null)
                     {
-                        m_selectionContext.SelectionChanged -= new EventHandler(selection_Changed);
+                        m_selectionContext.SelectionChanged -= selection_Changed;
                         m_selectionContext = null;
                     }
 
@@ -564,16 +600,16 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
                     m_observableContext = AdaptedControl.ContextAs<IObservableContext>();
                     if (m_observableContext != null)
                     {
-                        m_observableContext.ItemInserted += new EventHandler<ItemInsertedEventArgs<object>>(graph_ObjectInserted);
-                        m_observableContext.ItemRemoved += new EventHandler<ItemRemovedEventArgs<object>>(graph_ObjectRemoved);
-                        m_observableContext.ItemChanged += new EventHandler<ItemChangedEventArgs<object>>(graph_ObjectChanged);
-                        m_observableContext.Reloaded += new EventHandler(graph_Reloaded);
+                        m_observableContext.ItemInserted += graph_ObjectInserted;
+                        m_observableContext.ItemRemoved += graph_ObjectRemoved;
+                        m_observableContext.ItemChanged += graph_ObjectChanged;
+                        m_observableContext.Reloaded += graph_Reloaded;
                     }
 
                     m_selectionContext = AdaptedControl.ContextAs<ISelectionContext>();
                     if (m_selectionContext != null)
                     {
-                        m_selectionContext.SelectionChanged += new EventHandler(selection_Changed);
+                        m_selectionContext.SelectionChanged += selection_Changed;
                     }
 
                     m_visibilityContext = AdaptedControl.ContextAs<IVisibilityContext>();
@@ -589,11 +625,13 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
 
         private void graph_ObjectInserted(object sender, ItemInsertedEventArgs<object> e)
         {
+            m_renderer.OnGraphObjectInserted(sender, e);
             Invalidate();
         }
 
         private void graph_ObjectRemoved(object sender, ItemRemovedEventArgs<object> e)
         {
+            m_renderer.OnGraphObjectRemoved(sender, e);
             Invalidate();
         }
 
@@ -648,7 +686,6 @@ namespace Sce.Atf.Controls.Adaptable.Graphs
         private D2dAdaptableControl m_d2dControl;
         private D2dGraphics m_d2dGraphics;
         private readonly D2dGraphRenderer<TNode, TEdge, TEdgeRoute> m_renderer;
-        private readonly ITransformAdapter m_transformAdapter;
         private object m_hoverObject;
         private object m_hoverSubObject;
         private ISelectionPathProvider m_selectionPathProvider;

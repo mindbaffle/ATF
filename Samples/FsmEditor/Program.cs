@@ -62,7 +62,7 @@ namespace FsmEditorSample
                 typeof(StandardFileCommands),           // standard File menu commands for New, Open, Save, SaveAs, Close
                 typeof(MainWindowTitleService),         // tracks document changes and updates main form title
                 typeof(TabbedControlSelector),          // enable ctrl-tab selection of documents and controls within the app
-
+                typeof(SkinService),                    // skin service.
                 typeof(ContextRegistry),                // central context registry with change notification
                 typeof(StandardFileExitCommand),        // standard File exit menu command
                 typeof(StandardEditCommands),           // standard Edit menu commands for copy/paste
@@ -77,7 +77,7 @@ namespace FsmEditorSample
                 typeof(HelpAboutCommand),               // Help -> About command
 
                 typeof(PaletteService),                 // global palette, for drag/drop instancing
-                typeof(HistoryLister),                  // vistual list of undo/redo stack
+                typeof(HistoryLister),                  // visual list of undo/redo stack
                 typeof(PropertyEditor),                 // property grid for editing selected objects
                 typeof(GridPropertyEditor),             // grid control for editing selected objects
                 typeof(PropertyEditingCommands),        // commands for PropertyEditor and GridPropertyEditor, like Reset,
@@ -88,7 +88,6 @@ namespace FsmEditorSample
                 typeof(Outputs),                        // passes messages to all log writers
                 typeof(ErrorDialogService),             // displays errors to the user in a message box
 
-                typeof(DiagramTheme),                   // rendering theme for diagrams
                 typeof(Editor),                         // editor which manages FSM documents and controls
                 typeof(PaletteClient),                  // component which adds items to palette
                 typeof(DefaultTabCommands),             // provides the default commands related to document tab Controls

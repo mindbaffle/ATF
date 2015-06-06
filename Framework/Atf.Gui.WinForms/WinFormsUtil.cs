@@ -111,12 +111,12 @@ namespace Sce.Atf
         /// <summary>
         /// Performs the standard WinForms check for an illegal cross-thread call on a control.
         /// See: http://andyclymer.blogspot.com/2006/07/custom-controls-and-cross-_115218128668993214.html </summary>
-        /// <param name="control">Control to be checked</param>
+        /// <param name="control">Control to be checked. Can be null, in which case no exception is thrown.</param>
         /// <remarks>Throws InvalidOperationException exception if illegal cross-thread call.</remarks>
         /// <exception cref="InvalidOperationException">Illegal cross-thread call</exception>
-        public static void CheckForIllegalCrossThreadCall(Control control)
+        public static void CheckForIllegalCrossThreadCall(this Control control)
         {
-            if (Control.CheckForIllegalCrossThreadCalls &&
+            if (control != null && Control.CheckForIllegalCrossThreadCalls &&
                 control.InvokeRequired)
             {
                 throw new InvalidOperationException("Illegal cross-thread call");
@@ -125,11 +125,12 @@ namespace Sce.Atf
 
         /// <summary>
         /// Uses a Control's Invoke() method to call the given delegate, if necessary</summary>
-        /// <param name="control">The Control that may have been created on a thread other than the current thread</param>
+        /// <param name="control">The Control that may have been created on a thread other than
+        /// the current thread. Can be null, in which case 'action' is always performed.</param>
         /// <param name="action">The action to perform, e.g., () => { control.Refresh(); }</param>
-        public static void InvokeIfRequired(Control control, Action action)
+        public static void InvokeIfRequired(this Control control, Action action)
         {
-            if (control.InvokeRequired)
+            if (control != null && control.InvokeRequired)
                 control.Invoke(action);
             else
                 action();
@@ -188,8 +189,10 @@ namespace Sce.Atf
         }
 
         /// <summary>
-        /// Updates vertical and horizontal scrollbars to correspond to the current visible and canvas
-        /// dimensions</summary>
+        /// Updates vertical and horizontal scrollbars to correspond to the given visible and canvas
+        /// areas. The scrollbars' Minimum and Maximum properties will be set to fit the union of the
+        /// content and visible areas. Negative coordinates are supported. The Value property of the
+        /// scrollbars will be automatically capped if necessary to be between Minimum and Maximum.</summary>
         /// <param name="vScrollBar">Vertical scrollbar, or null if none</param>
         /// <param name="hScrollBar">Horizontal scrollbar, or null if none</param>
         /// <param name="visibleArea">Size of view of canvas</param>
@@ -237,12 +240,10 @@ namespace Sce.Atf
 
                     vScrollBar.Visible = true;
 
-                    vScrollBar.LargeChange = visibleArea.Height;
+                    vScrollBar.LargeChange = Math.Max(visibleArea.Height, 1);
                     vScrollBar.SmallChange = Math.Max(1, vScrollBar.LargeChange / 10);
-                    vScrollBar.Minimum = 0;
-                    vScrollBar.Maximum = numPixelsOffScreenY + visibleArea.Height - 1;
-                    // note, unlike the other overload this actually sets the Value, not just cap its range
-                    vScrollBar.Value = Math.Min(Math.Max(0, visibleArea.Top - contentArea.Top), numPixelsOffScreenY-1);
+                    vScrollBar.Minimum = canvas.Top;
+                    vScrollBar.Maximum = canvas.Bottom;
                 }
                 else
                 {
@@ -257,12 +258,10 @@ namespace Sce.Atf
                 {
                     hScrollBar.Visible = true;
 
-                    hScrollBar.LargeChange = visibleArea.Width;
+                    hScrollBar.LargeChange = Math.Max(visibleArea.Width, 1);
                     hScrollBar.SmallChange = Math.Max(1, hScrollBar.LargeChange / 10);
-                    hScrollBar.Minimum = 0;
-                    hScrollBar.Maximum = numPixelsOffScreenX + visibleArea.Width - 1;
-                    // note, unlike the other overload this actually sets the Value, not just cap its range
-                    hScrollBar.Value = Math.Min(Math.Max(0, visibleArea.Left - contentArea.Left), numPixelsOffScreenX-1);
+                    hScrollBar.Minimum = canvas.Left;
+                    hScrollBar.Maximum = canvas.Right;
                 }
                 else
                 {
